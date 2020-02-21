@@ -1,0 +1,33 @@
+ARG BASE_IMAGE={{docker_jhub_base_image}}
+FROM $BASE_IMAGE
+
+ARG JHUB_FILES=/tmp/jupyterhub
+
+ENV PYTHONPATH=/usr/local/lib/python3.6/dist-packages:$PYTHONPATH
+
+USER root
+
+# Update pip
+RUN python3 -m pip install --no-cache --upgrade setuptools pip
+
+RUN apt-get update \
+ && apt-get install -yq --no-install-recommends \
+    fonts-liberation \
+    sudo \
+    wget \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install packages from requirements file
+COPY jupyterhub-requirements.txt $JHUB_FILES/requirements.txt
+RUN python3 -m pip install --no-cache -r $JHUB_FILES/requirements.txt
+
+# /etc/jupyterhub/jupyterhub_config.py by default
+COPY {{jhub_config}} /etc/jupyterhub/{{jhub_config}}
+
+# Get cull-idle from jupyterhub examples folder
+RUN wget https://raw.githubusercontent.com/jupyterhub/jupyterhub/d126baa443ad7d893be2ff4a70afe9ef5b8a4a1a/examples/cull-idle/cull_idle_servers.py
+
+WORKDIR /srv/jupyterhub
+
+CMD ["python3", "jupyterhub", "-f", "/etc/jupyterhub/{{jhub_config}}"]

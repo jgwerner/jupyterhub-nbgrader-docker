@@ -1,0 +1,250 @@
+import os, re, shutil, pwd
+
+import requests
+
+from tornado import gen
+
+
+c = get_config()
+
+##########################################
+# BEGIN JUPYTERHUB APPLICATION
+##########################################
+
+# set to debug for testing
+c.JupyterHub.log_level = 'DEBUG'
+
+# Allows multiple single-server per user
+c.JupyterHub.allow_named_servers = False
+
+# Load data files
+c.JupyterHub.data_files_path = '/usr/local/share/jupyterhub/'
+
+# allow the hub to listen on any ip address
+c.JupyterHub.hub_ip = '0.0.0.0'
+
+# this is usually the hub container's name
+c.JupyterHub.hub_connect_ip = os.environ.get('JUPYTERHUB_SERVICE_NAME')
+
+# pre flight service token
+c.JupyterHub.service_tokens = {    
+    os.environ.get('JUPYTERHUB_API_TOKEN'): os.environ.get('JUPYTERHUB_CLIENT_ID')
+}
+
+# load data files
+c.JupyterHub.data_files_path = '/usr/local/share/jupyterhub/'
+
+# instructor1 and instructor2 have access to different shared servers
+# bitdiddle, hacker, and reasoner students are from nbgrader quickstart
+c.JupyterHub.load_groups = {
+    os.environ.get('GRADER_GROUP'): [
+        'instructor1',
+        'instructor2',
+        os.environ.get('GRADER_USERNAME'),
+    ],
+    os.environ.get('STUDENT_GROUP'): ['student1', 'bitdiddle', 'hacker', 'reasoner',],
+}
+
+# Allow admin access to running Jupyter Notebooks
+c.JupyterHub.admin_access = True
+
+# Start the notebook server culling service.
+c.JupyterHub.services = [
+    {
+        'name': 'cull_idle',
+        'admin': True,
+        'command': 'python3 /srv/jupyterhub/cull_idle_servers.py --timeout=3600'.split(),
+    },
+]
+
+# Admin api tokens, used primarily by grader service
+c.JupyterHub.service_tokens = {
+    os.environ.get('JUPYTERHUB_API_TOKEN') : 'admin',
+}
+
+# Refrain from cleaning up servers when restarting the hub
+c.JupyterHub.cleanup_servers = False
+
+##########################################
+# END JUPYTERHUB APPLICATION
+##########################################
+
+##########################################
+# BEGIN CHP
+##########################################
+
+c.JupyterHub.cleanup_servers = False
+c.ConfigurableHTTPProxy.should_start = False
+c.ConfigurableHTTPProxy.auth_token = os.environ.get('CONFIGURABLE_HTTP_PROXY')
+c.ConfigurableHTTPProxy.api_url = os.environ.get('JUPYTERHUB_API_URL')
+
+##########################################
+# END CHP
+##########################################
+
+##########################################
+# BEGIN BASE AUTHENTICATOR
+##########################################
+
+# get from db/user pool/etc?
+c.Authenticator.admin_users = {
+    'admin',
+    'instructor1',
+    'instructor2',
+    os.environ.get('JUPYTERHUB_CLIENT_ID'),
+}
+
+c.Authenticator.whitelist = [
+   'instructor1',
+   'instructor2',
+   'student1',
+   'bitdiddle',
+   'hacker',
+   'reasoner',
+   os.environ.get('GRADER_USERNAME'),
+]
+
+c.Authenticator.enable_auth_state = True
+
+##########################################
+# END BASE AUTHENTICATOR
+##########################################
+
+##########################################
+# BEGIN CUSTOM FIRSTUSE AUTHENTICATOR
+##########################################
+
+# Check membership
+api_url = os.environ.get('CONFIGURABLE_HTTP_PROXY_API_URL')
+
+# Get token
+token = os.environ.get('JUPYTERHUB_API_TOKEN')
+
+def _get_instructor_users(api_url, token):
+    """Get users that are a member of the grader group"""
+    course_id = os.environ.get('COURSE_ID')
+    instructor_group_response = requests.get(api_url + '/groups/formgrade-' + course_id + '/users',
+        headers={
+                'Authorization': 'token %s' % token,
+                },
+    )
+    instructor_group_response.raise_for_status()
+    return instructor_group_response.json()
+
+from firstuseauthenticator import FirstUseAuthenticator
+
+class CustomFirstUseAuthenticator(FirstUseAuthenticator):
+
+    @gen.coroutine
+    def pre_spawn_start(self, user, spawner):
+        """Assume everyone is a Learner except for those users in the instructor group"""
+        instructors = _get_instructor_users
+        user.spawner.environment['USER_ROLE'] = 'Learner'
+        if user.name in instructors:
+            user.spawner.environment['USER_ROLE'] = 'Instructor'
+        self.log.debug('Successfully assigned role to user.spawner.environment[USER_ROLE] key with a value of ' +  user.spawner.environment['USER_ROLE'])
+
+c.FirstUseAuthenticator.create_users = False
+
+c.JupyterHub.authenticator_class = CustomFirstUseAuthenticator
+
+##########################################
+# END CUSTOM FIRSTUSE AUTHENTICATOR
+##########################################
+
+##########################################
+# BEGIN BASE SPAWNER
+##########################################
+
+# Create a new user directory if it does not exist on the host, regardless
+# of whether its mounted with NFS.
+def create_dir_hook(spawner):
+    """ Create user directory """
+    username = spawner.user.name
+    user_path = os.path.join('/home', username)
+    if not os.path.exists(user_path):
+        os.mkdir(user_path)
+        shutil.chown(user_path, user=os.environ.get('NB_UID'), group=os.environ.get('NB_GID'))
+        os.chmod(user_path, 0o755)
+
+c.Spawner.pre_spawn_hook = create_dir_hook
+
+# Removes the need to grant authorization from shared grader notebook
+c.Spawner.oauth_no_confirm = True
+
+# Limit memory
+c.Spawner.mem_limit = '1G'
+
+##########################################
+# END BASE SPAWNER
+##########################################
+
+##########################################
+# BEGIN CUSTOM DOCKERSPAWNER
+##########################################
+
+# Define a custom start function to get user's image based on role
+from dockerspawner import DockerSpawner
+
+def _image_from_role(user_role: str) -> str:
+    """Given a user role, return the right image"""
+    if user_role == 'Learner':
+        return str(os.environ.get('DOCKER_LEARNER_IMAGE'))
+    if user_role == 'Instructor':
+        return str(os.environ.get('DOCKER_INSTRUCTOR_IMAGE'))
+    if user_role == 'Grader':
+        return str(os.environ.get('DOCKER_GRADER_IMAGE'))
+    else:
+        return str(os.environ.get('DOCKER_STANDARD_IMAGE'))
+
+class CustomDockerSpawner(DockerSpawner):
+    def start(self):
+        user_role = self.user.spawner.environment.get('USER_ROLE') or 'Learner'
+        self.log.debug('User ' + self.user.name + ' has role: ' + user_role)
+        self.image = _image_from_role(str(user_role))
+        self.log.debug('Starting with image: ' + self.image)
+        return super().start()
+
+# launch with custom dockerspawner class
+c.JupyterHub.spawner_class = CustomDockerSpawner
+
+# User data persistence
+# see https://github.com/jupyterhub/dockerspawner#data-persistence-and-dockerspawner
+notebook_dir = os.environ.get('DOCKER_NOTEBOOK_DIR')
+if _image_from_role == 'Grader':
+    notebook_dir = os.environ.get('GRADER_USERNAME')
+
+c.DockerSpawner.notebook_dir = notebook_dir
+
+# allow container to use any ip address
+c.DockerSpawner.container_ip = '0.0.0.0'
+
+spawn_cmd = os.environ.get('DOCKER_SPAWN_CMD', "start-singleuser.sh")
+c.DockerSpawner.extra_create_kwargs.update({ 'command': spawn_cmd })
+
+# tell the user containers to connect to our docker network
+network_name = os.environ.get('DOCKER_NETWORK_NAME') or 'jupyter-network'
+c.DockerSpawner.network_name = network_name
+
+# Remove containers when stopping the hub
+c.DockerSpawner.remove_containers = True
+c.DockerSpawner.remove = True
+
+# notebook image name
+notebook_image_name = os.environ.get('NOTEBOOK_IMAGE_NAME') or 'jupyterhub-user'
+
+# nbgrader exchange directory
+exchange_dir = os.environ.get('EXCHANGE_DIR') or '/srv/nbgrader/exchange'
+
+# custom account name
+account_name = os.environ.get('ORGANIZATION_NAME') or 'test-account'
+
+# mount volumes
+c.DockerSpawner.volumes = {
+    '{{nfs_root}}/' + account_name + '/home/{username}': notebook_dir,
+    '{{nfs_root}}/' + account_name + '/exchange': exchange_dir,
+}
+
+##########################################
+# END CUSTOM DOCKERSPAWNER
+##########################################

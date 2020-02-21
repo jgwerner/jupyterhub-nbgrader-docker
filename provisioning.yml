@@ -1,0 +1,8 @@
+---
+  # play 1
+  - name: JupyterHub + nbgrader + docker
+    hosts: custom
+    become: true
+    gather_facts: false
+    roles:
+      - { role: common, tags: common }

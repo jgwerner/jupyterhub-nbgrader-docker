@@ -1,0 +1,222 @@
+# Default to python3
+- name: Install python for Ansible
+  raw: test -e /usr/bin/python3 || (apt -y update && apt install -y python3-minimal)
+  changed_when: False
+- setup: # aka gather_facts
+
+- name: "APT: Install aptitude package"
+  apt:
+    name: aptitude
+    force_apt_get: yes
+
+- name: Update all packages to the latest version  
+  apt: >
+    upgrade=yes
+    update_cache=yes
+    cache_valid_time=3600
+
+- name: Install pip
+  apt:
+    name: python3-pip
+    state: latest
+
+- name: Install NFS Utils
+  apt:
+    pkg: ['nfs-common', 'autofs', 'rpcbind', 'docker.io']
+    state: latest
+
+- name: Install docker-compose
+  get_url:
+    url: https://github.com/docker/compose/releases/download/1.25.3/docker-compose-Linux-x86_64
+    dest: /usr/local/bin/docker-compose
+    mode: 0755
+
+- name: Ensure rpcbind service is running
+  service: name=rpcbind state=started enabled=yes
+
+- name: Create root directory on host for mounts
+  file:
+    path: "{{ item.dest }}"
+    mode: "{{ item.mode }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    state: directory
+  with_items:
+    - { dest: "{{ nfs_root }}", mode: '0755', owner: 'root', group: 'root' }
+
+- name: Create directories within mount/nfs directory
+  file:
+    path: "{{ item.dest }}"
+    mode: "{{ item.mode }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    state: directory
+  with_items:
+    - { dest: "{{ nfs_root }}/{{ org_name }}", mode: "{{ nfs_org_dir_permissions }}", owner: 'root', group: 'root' }
+    - { dest: "{{ nfs_root }}/{{ org_name }}/{{ nfs_exch_dir }}", mode: "{{ nfs_exch_dir_permissions }}", owner: 'root', group: 'root' }
+    - { dest: "{{ nfs_root }}/{{ org_name }}/{{ grader_home }}", mode: "{{ nfs_home_dir_permissions }}", owner: "{{ grader_instructor_uid }}", group: "{{ grader_gid }}" }
+    - { dest: "{{ nfs_root }}/{{ org_name }}/{{ grader_home }}/.jupyter", mode: "{{ nfs_home_dir_permissions }}", owner: "{{ grader_instructor_uid }}", group: "{{ grader_gid }}" }
+    - { dest: "{{ nfs_root }}/{{ org_name }}/{{ grader_home }}/{{ course_id }}", mode: "{{ nfs_home_dir_permissions }}", owner: "{{ grader_instructor_uid }}", group: "{{ grader_gid }}" }
+
+- name: Install Docker Module for Python
+  pip:
+    name: docker
+
+- name: Add docker to sudoers
+  become: true
+  shell: usermod -aG docker ubuntu
+
+- name: Create a network
+  docker_network:
+    name: "{{docker_net}}"
+
+- name: Create a working directory
+  file: path='{{ working_dir }}' state=directory
+
+- name: Generate random key for jupyterhub crypt key
+  shell: /usr/bin/openssl rand -hex 32
+  register: _jhub_crypt_key_result
+
+- name: Assign jhub cryptographic key from stdout 
+  set_fact: 
+    jhub_crypt_key={{_jhub_crypt_key_result.stdout}}
+
+- name: Generate random key for jupyterhub api token
+  shell: /usr/bin/openssl rand -hex 32
+  register: _jhub_api_token_result
+
+- name: Assign jhub api token from stdout
+  set_fact: 
+    jhub_api_token={{_jhub_api_token_result.stdout}}
+
+- name: Generate random key for proxy
+  shell: /usr/bin/openssl rand -hex 32
+  register: _config_auth_proxy_token_result
+
+- name: Assign config auth proxy token from stdout
+  set_fact: 
+    config_auth_proxy_token={{_config_auth_proxy_token_result.stdout}}
+    
+- name: Create the grader service env var file file from template
+  template: "dest={{ working_dir }}/{{ docker_service_env_file }} src={{ docker_service_env_file }}.j2"
+
+- name: Create the jupyterhub env var file from template
+  template: "dest={{ working_dir }}/{{ docker_jhub_env_file }} src={{ docker_jhub_env_file }}.j2"
+  tags:
+    - jupyterhub
+
+- name: Create the jupyter notebook configuration file from template
+  template: "dest={{ working_dir }}/{{ jupyter_notebook_config }} src={{ jupyter_notebook_config }}.j2"
+
+- name: Create the jupyterhub configuration file from template
+  template: "dest={{ working_dir }}/{{ jhub_config }} src={{ jhub_config }}.j2"
+
+- name: Create the nbgrader global (learner/instructor) configuration file from template    
+  template: "dest={{ working_dir }}/{{ nbgrader_global_config }} src={{ nbgrader_global_config }}.j2"
+
+- name: Create the nbgrader grader profile configuration file from template
+  template: "dest={{ working_dir }}/{{ nbgrader_grader_config }} src={{ nbgrader_grader_config }}.j2"
+
+- name: Create the nbgrader grader course configuration file from template
+  template: "dest={{ working_dir }}/{{ nbgrader_grader_course_config }} src={{ nbgrader_grader_course_config }}.j2"
+
+- name: Copy the nbgrader grader configuration file to the nfs directory
+  template: "dest={{ nfs_grader_nbgrader_config_path }}/{{ nbgrader_grader_config }} src={{ nbgrader_grader_course_config }}.j2"
+
+- name: Copy the nbgrader grader course configuration file to the nfs directory
+  template: "dest={{ nfs_grader_course_nbgrader_config_path }}/{{ nbgrader_grader_course_config }} src={{ nbgrader_grader_course_config }}.j2"
+
+- name: Create the docker-compose yaml file from template 
+  template: "dest={{ working_dir }}/{{ docker_dc_yml }} src={{ docker_dc_yml }}.j2"
+
+- name: Create custom jupyterhub dockerfile from template
+  template: "dest={{ working_dir }}/{{ docker_jupyterhub_base_dockerfile }} src={{ docker_jupyterhub_base_dockerfile }}.j2"
+
+- name: Create base notebook dockerfile from template
+  template: "dest={{ working_dir }}/{{ docker_notebook_base_dockerfile }} src={{ docker_notebook_base_dockerfile }}.j2"
+
+- name: Create instructor dockerfile    
+  template: "dest={{ working_dir }}/{{ docker_notebook_instructor_dockerfile }} src={{ docker_notebook_instructor_dockerfile }}.j2"
+
+- name: Create learner dockerfile    
+  template: "dest={{ working_dir }}/{{ docker_notebook_learner_dockerfile }} src={{ docker_notebook_learner_dockerfile }}.j2"
+
+- name: Create grader notebook dockerfile from template
+  template: "dest={{ working_dir }}/{{ docker_notebook_grader_dockerfile }} src={{ docker_notebook_grader_dockerfile }}.j2"
+
+- name: Copy requirements.txt for base notebook image
+  copy:
+    src: "files/jupyter-notebook-requirements.txt"
+    dest: "{{ working_dir }}/jupyter-notebook-requirements.txt"
+
+- name: Copy requirements.txt for base notebook image
+  copy:
+    src: "files/jupyterhub-requirements.txt"
+    dest: "{{ working_dir }}/jupyterhub-requirements.txt"
+
+- name: Build base jupyterhub image
+  docker_image:
+    name: "{{ docker_custom_jhub_image }}"
+    build:
+      path: "{{ working_dir }}"
+      dockerfile: "{{ docker_jupyterhub_base_dockerfile }}"
+      pull: no
+    source: build
+    force_source: yes
+
+- name: Pull base jupyter/datascience notebook image
+  docker_image: 
+    name: "{{ docker_notebook_base_image }}"
+    source: pull
+
+- name: Build base notebook image
+  docker_image:
+    name: "{{ docker_custom_notebook_base_image }}"
+    build:
+      path: "{{ working_dir }}"
+      dockerfile: "{{ docker_notebook_base_dockerfile }}"
+      pull: no
+    source: build
+    force_source: yes
+
+- name: Build custom grader notebook image
+  docker_image:
+    name: "{{ docker_custom_notebook_grader_image }}"
+    build:
+      path: "{{ working_dir }}"
+      dockerfile: "{{ docker_notebook_grader_dockerfile }}"
+      pull: no
+    source: build
+    force_source: yes
+
+- name: Build custom instructor notebook image
+  docker_image:
+    name: "{{ docker_custom_notebook_instructor_image }}"
+    build:
+      path: "{{ working_dir }}"
+      dockerfile: "{{ docker_notebook_instructor_dockerfile }}"
+      pull: no
+    source: build
+    force_source: yes
+
+- name: Build custom learner notebook image
+  docker_image:
+    name: "{{ docker_custom_notebook_learner_image }}"
+    build:
+      path: "{{ working_dir }}"
+      dockerfile: "{{ docker_notebook_learner_dockerfile }}"
+      pull: no
+    source: build
+    force_source: yes
+
+- name: "JupyterHub cryptographic key value"
+  debug:
+    msg: "JupyterHub cryptograhic key is: {{ jhub_crypt_key }}"
+    
+- name: "JupyterHub config auth proxy token"
+  debug:
+    msg: "JupyterHub CHP token is: {{ config_auth_proxy_token }}"
+
+- name: "JupyterHub API token"
+  debug:
+    msg: "JupyterHub API token is: {{ jhub_api_token }}"

@@ -1,0 +1,34 @@
+ARG BASE_IMAGE={{docker_notebook_base_image}}
+FROM $BASE_IMAGE
+
+ARG JHUB_FILES=/tmp/jupyterhub
+
+USER $NB_UID
+
+# Update JupyterHub version, so that its consistent with JupyterHub
+RUN git clone https://github.com/jupyterhub/jupyterhub \
+ && cd jupyterhub \
+ && git checkout -b build {{git_jhub_hash_commit}} \
+ && npm install \
+ && npm install tslib \
+ && python3 -m pip install .
+
+# Install packages from requirements file
+COPY jupyter-notebook-requirements.txt $JHUB_FILES/requirements.txt
+RUN python3 -m pip install --no-cache -r $JHUB_FILES/requirements.txt
+
+# install and enable classic notebook extensions
+# https://jupyter-contrib-nbextensions.readthedocs.io/en/latest/install.html
+RUN python3 -m pip install \
+    ipywidgets \
+    jupyter_contrib_nbextensions \
+    widgetsnbextension \
+    && \
+    jupyter contrib nbextension install --sys-prefix && \
+    jupyter nbextension enable --py widgetsnbextension --sys-prefix && \
+    fix-permissions $CONDA_DIR && \
+    fix-permissions /home/$NB_USER
+
+EXPOSE 8888
+
+WORKDIR /home/$NB_USER

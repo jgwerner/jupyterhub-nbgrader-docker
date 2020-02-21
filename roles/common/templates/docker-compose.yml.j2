@@ -1,0 +1,51 @@
+version: "3.5"
+
+services:
+  {{docker_jhub_service_name}}:
+    restart: on-failure
+    image: {{docker_custom_jhub_image}}
+    container_name: {{docker_jhub_service_name}}
+    depends_on:
+      - {{docker_chp_service_name}}
+    volumes:
+      - {{docker_socket_mount}}
+      - {{nfs_root}}/{{org_name}}/{{home_dir}}:/{{home_dir}}
+    env_file:
+      - {{docker_jhub_env_file}}
+    command: >
+      jupyterhub -f /etc/jupyterhub/{{jhub_config}} --debug
+  {{docker_chp_service_name}}:
+    restart: on-failure
+    image: {{docker_chp_base_image}}
+    container_name: {{docker_chp_service_name}}
+    ports:
+      - {{docker_proxy_ext_proxy_port}}:{{docker_proxy_ext_proxy_port}}
+    environment:
+      - CONFIGURABLE_HTTP_PROXY={{config_auth_proxy_token}}
+    command: >
+      configurable-http-proxy
+      --port {{docker_proxy_ext_proxy_port}}
+      --api-ip 0.0.0.0
+      --api-port {{docker_proxy_int_proxy_port}}
+      --default-target=http://{{docker_jhub_service_name}}:{{docker_jhub_int_api_port}}
+      --error-target=http://{{docker_jhub_service_name}}:{{docker_jhub_int_api_port}}/hub/error
+  {{course_id}}:
+    restart: on-failure
+    image: {{docker_custom_notebook_grader_image}}
+    container_name: {{docker_grader_service_name}}
+    user: root
+    volumes:
+      - {{nfs_root}}/{{org_name}}/{{grader_home}}:/{{grader_home}}
+      - {{nfs_root}}/{{org_name}}/exchange:{{nbgrader_exch_dir}}
+    env_file:
+      - {{docker_service_env_file}}
+    command: >
+      start-notebook.sh --group={{grader_group}} --allow-root
+
+volumes:
+  jupyterhub:
+
+networks:
+  default:
+    external:
+      name: {{docker_net}}

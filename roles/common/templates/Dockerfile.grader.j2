@@ -1,0 +1,15 @@
+ARG BASE_IMAGE={{docker_custom_notebook_base_image}}
+FROM $BASE_IMAGE
+
+ARG USER_ROLE=Grader
+ARG NB_UID={{grader_instructor_uid}}
+ARG NB_USER={{grader_username}}
+ARG COURSE_ID={{course_id}}
+
+USER $NB_UID
+
+RUN jupyter nbextension enable --sys-prefix create_assignment/main \
+ && jupyter nbextension enable --sys-prefix formgrader/main --section=tree \
+ && jupyter serverextension enable --sys-prefix nbgrader.server_extensions.formgrader
+
+WORKDIR /home/$NB_USER
