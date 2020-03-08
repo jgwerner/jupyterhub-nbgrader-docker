@@ -2,9 +2,8 @@
 nbgrader==0.6.1
 
 # Authenticators
-oauthenticator==0.11.0
+jupyterhub-dummyauthenticator==0.3
 jupyterhub-firstuseauthenticator==0.12
-jupyterhub-ltiauthenticator==0.4.0
 
 # Spawners
 dockerspawner==0.11.1

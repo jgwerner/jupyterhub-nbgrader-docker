@@ -61,7 +61,6 @@ docker_jhub_base_image: "{{ docker_jhub_base_image_param | default('jupyterhub/j
 
 # reverse proxy images
 docker_chp_base_image: "{{ docker_chp_base_image_param | default('jupyterhub/configurable-http-proxy:4.2.0') }}"
-docker_etcd_base_image: "{{ docker_etcd_base_image_param | default('bitnami/etcd:3.4.3') }}"
 docker_custom_jhub_image: "{{ docker_custom_jhub_image_param | default('custom/jupyterhub:base-') }}{{ docker_jhub_hash_commit }}"
 
 # custom notebooks base and custom images

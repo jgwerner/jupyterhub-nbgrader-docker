@@ -30,7 +30,9 @@ In it's basic form:
 
 ```bash
 ansible-playbook \
-  provisioning.yml
+  provisioning.yml \
+  private_key_file=/path/to/my/private/pem \
+  remote_user = ubuntu
 ```
 
 With custom variables and with verbose output:
@@ -39,25 +41,27 @@ With custom variables and with verbose output:
 ansible-playbook \
   provisioning.yml \
   --extra-vars \
+  private_key_file=/path/to/my/private/pem \
+  remote_user = ubuntu \
   "org_name=myedu"
   -v
 ```
 
 All global variable names are listed in `ansible/group_vars/all.yml`.
 
-## Components
+## Artifacts
 
 * **JupyterHub**: Runs [JupyterHub](https://jupyterhub.readthedocs.org/en/latest/getting-started.html#overview) within a Docker container running as root.
 
-* **Authenticator**: Authentication service. For development, this setup uses a customized version of either the [FirstUseAuthenticator](https://github.com/jupyterhub/dummyauthenticator).
+* **Authenticator**: Authentication service. This setup uses a customized version of the [FirstUseAuthenticator](https://github.com/jupyterhub/dummyauthenticator).
 
-* **Spawner**: Spawning service to manage user notebooks. This setup uses a custom [DockerSpawner](https://github.com/jupyterhub/dockerspawner).
+* **Spawner**: Spawning service to manage user notebooks. This setup uses a customized version of the [DockerSpawner](https://github.com/jupyterhub/dockerspawner).
 
 * **Data Directories**: Data directories for configuration files, databases, etc rely on the containers themselves or by mounting directories from the host.
 
 * **Databases**: This setup relies on the default `SQLite` databases for both JupyterHub and nbgrader.
 
-* **Network**: An external bridge network named `jupyter-network` is used by default. The grader notebook service and the end-user notebooks are attached to this network when spawned.
+* **Network**: An external bridge network named `jupyter-network` is used by default.
 
 ## Customization
 
@@ -94,7 +98,7 @@ Three `nbgrader_config.py` files should exist, two for the shared grader account
 
 > **Note**: nbgrader utilizes the directory structure within the exchange root (for example `/srv/nbgrader/exchange`) to list courses the instructors and learners have access to. If you don't see a particular course listed in the instructor's course list extension then make sure the course directory exists and that it has the right permissios.
 
-3. Jupyter Notebook configuration using `jupyter_notebook_config.py`. This configuration is standard fare and unless required does not need customized edits.
+3. Jupyter Notebook configuration using `jupyter_notebook_config.py`. This configuration does contain some customizations to create user directories and assigne user roles using `Authenticator` hooks, otherwise its standard fare.
 
 4. For this setup, the deployment configuration is defined primarily with `docker-compose.yml`.
 
@@ -314,6 +318,7 @@ The services included with this setup rely on environment variables to work prop
 
 ## Credits
 
+- [JupyterHub docs](https://jupyterhub.readthedocs.io/en/stable/)
 - [JupyterHub for Education](https://jupyterhub-deploy-teaching.readthedocs.io/en/latest/)
 - [JupyterHub deployment with docker-compose](https://github.com/jupyterhub/jupyterhub-deploy-docker)
 - [nbgrader demo for multiple classes](https://github.com/jupyter/nbgrader/tree/master/demos/demo_multiple_classes)

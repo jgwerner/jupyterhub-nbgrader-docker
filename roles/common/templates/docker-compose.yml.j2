@@ -42,9 +42,6 @@ services:
     command: >
       start-notebook.sh --group={{grader_group}} --allow-root
 
-volumes:
-  jupyterhub:
-
 networks:
   default:
     external:
