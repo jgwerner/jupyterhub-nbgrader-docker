@@ -2,7 +2,7 @@
 
 ## Status
 
-:**PLEASE REFER TO [illumidesk/illumidesk](https://github.com/illumidesk/illumidesk) IF YOU ARE INTERESTED IN A MAINTAINED VERSION OF THIS SETUP (PLUS MORE GOODIES :smile: )
+**PLEASE REFER TO [illumidesk/illumidesk](https://github.com/illumidesk/illumidesk) IF YOU ARE INTERESTED IN A MAINTAINED VERSION OF THIS SETUP (PLUS MORE GOODIES :smile: )**
 
 **Proof of Concept (POC)**
 
